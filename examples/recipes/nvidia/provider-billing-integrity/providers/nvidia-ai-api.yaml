@@ -2,15 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # OpenShell provider profile that binds a second credential to ai.api.nvidia.com,
-# the host for Nemotron rerank (and later Kumo). Imported by scripts/install.sh.
+# the host for Nemotron rerank and Kumo. Imported by scripts/install.sh.
 # The default NVIDIA inference credential is bound to integrate.api.nvidia.com
 # only, so calls to ai.api.nvidia.com fail with credential_endpoint_mismatch.
 # install.sh imports this profile, creates a provider of this type from the
 # build.nvidia.com key in .env (as NVIDIA_AI_API_KEY) and attaches it.
 
 id: billing-integrity-nvidia-ai-api
-display_name: NVIDIA AI API (rerank)
-description: Hosted Nemotron rerank on ai.api.nvidia.com
+display_name: NVIDIA AI API (rerank and Kumo)
+description: Hosted Nemotron rerank and Kumo Relational prediction on ai.api.nvidia.com
 category: other
 credentials:
 - name: api_key
@@ -30,6 +30,9 @@ endpoints:
   - allow:
       method: POST
       path: /v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking
+  - allow:
+      method: POST
+      path: /v1/structured-data/nvidia/kumo-relational/predictions
 binaries:
 - /usr/bin/python3*
 - /usr/local/bin/python3*

@@ -4,7 +4,7 @@
 | --- | --- |
 | Description | Helps program-integrity reviewers find anomalous provider billing, expand each lead to providers linked by shared addresses, bank accounts or owners, and total the paid exposure of each group, ending in a referral recommendation for a human. |
 | Industry | 🏛️ Public Sector |
-| Requirements | Docker · NemoClaw · NVIDIA Endpoints API key |
+| Requirements | Docker · NemoClaw · NVIDIA Endpoints API key · about 370 MB free in the sandbox · PyPI reachable at install time |
 | NemoClaw | Unpinned |
 | Harness | OpenClaw Unpinned |
 | OpenShell | Unpinned |
@@ -21,9 +21,9 @@ predictions, retrieved evidence and GPU-accelerated analytics instead of model
 memory. See [Agent Knowledge Foundation](#agent-knowledge-foundation) for what
 each component does here and which ones this version includes.
 
-> **Status: under development.** The CPU baseline and **Nemotron embed and
-> rerank** policy retrieval are included and verified. Kumo, Auto Ontology and
-> RAPIDS are planned (see [Roadmap](#roadmap)). See
+> **Status: under development.** The CPU baseline, **Nemotron embed and
+> rerank** policy retrieval and **Kumo** risk ranking are included and
+> verified. Auto Ontology and RAPIDS are planned (see [Roadmap](#roadmap)). See
 > [Verification](#verification) for exactly what was run.
 
 ## Agent Knowledge Foundation
@@ -35,7 +35,7 @@ and what this version actually ships.
 | Reviewer question | Foundation component | In this version |
 | --- | --- | --- |
 | What do the tables mean, and what is the right denominator? | **Auto Ontology**: a semantic layer over the provider-billing database with terms, relationships and measures that carry explicit as-of dates, queried through grounded text-to-SQL | Not included. The skill reads the CSV files directly. |
-| Who is likely to be audited in the next 90 days? | **Kumo** (`nvidia/kumo-relational`, hosted on build.nvidia.com): relational prediction over providers, addresses, claims and audit findings | Not included. `scan` is a transparent rule baseline, which is also the comparison point for a Kumo ranking. |
+| Who is likely to be audited in the next 90 days? | **Kumo** (`nvidia/kumo-relational`, hosted on build.nvidia.com): relational prediction over providers, addresses, claims and audit findings | **Included.** `kumo_predict.py` builds the graph as of 2026-06-30, asks Kumo the PQL question `PREDICT COUNT(audit_findings.*, 0, 90, days) > 0`, and prints a ranking with the package version, graph sizes and a fingerprint. The skill requires the agent to compare it with the `scan` rule baseline and to say what each uses. If Kumo fails it reports `blocked`; `scan` is never presented as a substitute. |
 | What does policy say? | **Nemotron embed and rerank**: retrieval over four public 42 CFR sections with citable passages | **Included.** `retrieve.py` embeds the chunks and query, reranks the closest, and returns each passage with a ready-made `[document, chunk N]` tag the skill requires in every policy statement. If the hosted call fails it reports `blocked` and substitutes nothing. |
 | Who is connected, and does it scale? | **RAPIDS** (cuDF, cuGraph through nx-cugraph): the same baseline and related-entity expansion on GPU | Not included. `related` and `cluster-exposure` run on CPU in the standard library. |
 
@@ -49,9 +49,11 @@ unavailable step is reported as blocked.
 The same scenario ran with these components outside NemoClaw in the source
 experiments, where the CPU and GPU tools produced matching answers, hosted
 Kumo ranked the planted ring highest, and Auto Ontology answered three of four
-grounded questions correctly. Those results are not reproduced by this recipe.
-This recipe's job is to place them inside a NemoClaw sandbox with reviewed
-network policy, one component at a time.
+grounded questions correctly. This recipe places the components inside a
+NemoClaw sandbox with reviewed network policy, one at a time. Its Kumo
+ranking agrees with the earlier one on which six providers rank highest, but
+the probabilities are not comparable (see [Known limitations](#known-limitations)),
+and the Auto Ontology and GPU results are not reproduced here.
 
 ## Screenshot
 
@@ -71,7 +73,7 @@ required before submission.
 | Verified on | NemoClaw v0.0.142, OpenShell v0.0.116, OpenClaw harness, Ubuntu 22.04, `nvidia/nemotron-3.5-lightning-30b-a3b` on NVIDIA Endpoints, a handful of runs, not repeated at scale. |
 | Evidence level | live end-to-end |
 | Support and maturity | Best-effort community support; see the repository support policy. |
-| External access, data, and actions | Inference calls to the configured provider, plus two POST paths from sandbox Python to build.nvidia.com for policy retrieval (embeddings and rerank; the 42 CFR text, not provider data, is what is embedded, along with the question). A second OpenShell provider is created from your key. No write actions. All data is synthetic. |
+| External access, data, and actions | Inference calls to the configured provider. Three POST paths from sandbox Python to build.nvidia.com: embeddings and rerank (the 42 CFR text and the question) and Kumo, **which receives the provider, address, claim and finding tables**. The install also reaches PyPI, temporarily, to build a roughly 370 MB Python environment, and creates a second OpenShell provider from your key. No write actions. All data is synthetic. |
 | Start here | [Quickstart](#quickstart) |
 | Confirm success | [Verification](#verification) |
 
@@ -103,7 +105,7 @@ Or connect and use the TUI: `nemoclaw billing-integrity connect`, then
 | Script | Purpose |
 | --- | --- |
 | `scripts/onboard.sh` | Create the sandbox with the OpenClaw harness. |
-| `scripts/install.sh` | Install the skill. With the `build` provider it also imports the provider profile, creates and attaches a second provider from your key, applies the egress policy, and restarts the sandbox (workspace kept) so the agent sees the new credential. |
+| `scripts/install.sh` | Install the skill. With the `build` provider it also imports the provider profile, creates and attaches a second provider from your key, applies the egress policy, builds the Kumo Python environment in `/sandbox/kumo-venv` (using a temporary `pypi` egress preset, removed again unless it was already applied), and restarts the sandbox (workspace kept) so the agent sees the new credential. |
 | `scripts/start.sh` | Recover the gateway and host forwards. |
 | `scripts/stop.sh` | Stop the gateway while keeping the sandbox and workspace. |
 | `scripts/generate_data.py` | Regenerate the synthetic data (deterministic). |
@@ -125,11 +127,18 @@ lead rather than guilt.
 
 ## Security notes
 
-- Egress is limited to two POST paths for Python only: `integrate.api.nvidia.com`
-  `/v1/embeddings` and `ai.api.nvidia.com` `/v1/retrieval/.../reranking`
+- Egress is limited to three POST paths for Python only: `integrate.api.nvidia.com`
+  `/v1/embeddings`, and on `ai.api.nvidia.com` the rerank path and
+  `/v1/structured-data/nvidia/kumo-relational/predictions`
   (`policies/nvidia-hosted-models.yaml`), plus the agent's inference provider.
-  What is sent is the policy text chunks and the reviewer's question; the
-  provider and claims data is not sent to these services.
+- **What leaves the sandbox:** the policy text chunks and the reviewer's
+  question go to embed and rerank. **Kumo receives the graph tables**: provider
+  specialty, state and address ID, address state, every claim row (provider,
+  beneficiary ID, date, procedure code, paid amount) on or before 2026-06-30,
+  and the finding rows. Do not point this at real data without a review of
+  that transfer.
+- `install.sh` adds the `pypi` egress preset only while it builds the Kumo
+  environment and removes it afterwards, unless it was already applied.
 - The raw API key stays in the OpenShell gateway. The sandbox holds
   `openshell:resolve:env:` placeholders, and OpenShell substitutes the key at
   egress, only on the host each credential is bound to. The embed credential is
@@ -141,14 +150,15 @@ lead rather than guilt.
 - Outputs are recommendations for human review. The skill instructs the agent
   not to assert fraud or order a payment suspension; that is a prompt-level
   rule, not an enforced control.
-- Remove it with `openshell sandbox provider detach billing-integrity billing-integrity-ai-api`,
+- To remove the hosted-model setup: `openshell sandbox provider detach billing-integrity billing-integrity-ai-api`,
   `openshell provider delete billing-integrity-ai-api`,
-  `nemoclaw billing-integrity policy remove nvidia-hosted-models`, and
-  `openshell provider profile delete billing-integrity-nvidia-ai-api`.
+  `nemoclaw billing-integrity policy remove nvidia-hosted-models`,
+  `openshell provider profile delete billing-integrity-nvidia-ai-api`, and
+  delete `/sandbox/kumo-venv` inside the sandbox.
 
 ## Verification
 
-**Evidence level:** live end-to-end (one run per workflow below; offline CPU workflow and Nemotron retrieval)
+**Evidence level:** live end-to-end (one run per workflow below: offline CPU workflow, Nemotron retrieval and Kumo)
 
 Onboard, install, then ask one question:
 
@@ -195,6 +205,31 @@ an answer's policy quotes match the retrieved chunks.
 **This does not verify:** that every policy statement an agent writes is
 retrieved. See the limitations.
 
+**Kumo risk ranking.** Reset the session, then ask a risk question:
+
+```bash
+nemoclaw billing-integrity sessions reset agent:main:main --agent main
+nemoclaw billing-integrity agent --agent main --session-id demo-2 -m \
+  "Using the provider-billing-integrity skill, which six providers are most likely to receive an audit finding in the 90 days after 2026-06-30? Answer in this chat. How does that compare with the rule-based billing scan, and how much should I trust the ranking?"
+```
+
+**Expected result:** a ranking from `kumo_predict.py` in which P001 to P006 take
+the top six places (observed order P004, P005, P006, P001, P002, P003 with scores
+between 0.031 and 0.045), the `scan` ranking beside it, and a plain statement
+that the Kumo scores are relative and not calibrated, because the graph holds
+only 3 prior findings. The tool output lists 80 providers, 4,685 claims and 3
+findings in the graph, one HTTP 200 from Kumo in about 1.5 seconds, and two
+recorded compatibility changes. The gateway audit log
+(`openshell logs billing-integrity | grep kumo-relational`) shows one allowed
+POST. Scores and order can change with the hosted model.
+
+**This verifies:** the Kumo egress path and credential binding, the environment
+built at install time, the in-process adapter, and that an agent runs Kumo and
+reports its ranking and its limits.
+
+**This does not verify:** Kumo's accuracy. Three prior findings make the ranking
+a demonstration that the pipeline works, not evidence of predictive skill.
+
 Offline checks, without a sandbox or any service call:
 
 ```bash
@@ -222,13 +257,13 @@ as the baseline to compare against.
 | --- | --- | --- |
 | 1 | CPU baseline | Done: standard-library tool, offline. |
 | 2 | Nemotron embed and rerank for policy evidence | Done: `retrieve.py`, egress policy, second provider, restart on install. Remaining: a larger document set, and measuring retrieval against BM25 (`--method bm25` is included for the comparison). |
-| 3 | Kumo risk ranking | Add the Kumo path to the policy and provider profile (the route was reachable in a spike; a real prediction was not run). Needs a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
+| 3 | Kumo risk ranking | Done: `kumo_predict.py`, the Kumo route in the policy and provider profile, a virtual environment built at install time (Python 3.13 wheels, no custom image needed), and the skill's compare-with-baseline rule. Remaining: a Kumo-versus-baseline evaluation on a larger graph. |
 | 4 | Auto Ontology | A host-side deployment reached through an authenticated, reviewed path, with its own API token. |
 | 5 | RAPIDS on GPU | A host-side service, not the sandbox. |
 | Evidence | Screenshot and a higher evidence level per stage | A real sandbox run of each stage. |
 
-`policies/nvidia-hosted-models.yaml` and `providers/nvidia-ai-api.yaml` cover stage 2
-only. The Kumo route is not allowed yet and is added with stage 3.
+`policies/nvidia-hosted-models.yaml` and `providers/nvidia-ai-api.yaml` cover stages 2
+and 3.
 
 ## Known limitations
 
@@ -247,6 +282,21 @@ only. The Kumo route is not allowed yet and is added with stage 3.
   section and paragraph references (for example "(d)(1)") can still be wrong, so
   trust the quoted passage and its `cite` tag, not paragraph numbers the agent
   adds. Check that retrieval ran when it matters.
+- **Kumo scores are not comparable with the earlier experiments' receipt**
+  (maximum 0.045 now, 0.26 then), although the same six providers lead. Two
+  compatibility changes were needed for the hosted service's current
+  validation and are recorded in each receipt: the adapter omits the engine's
+  default `inference.inference_config`, which the service now rejects, and the
+  graph drops the `addresses.street` column, which the service cannot read as
+  text. Either change, or the hosted model itself, could explain the lower
+  scale; they were not tested separately. The hosted API can change again.
+- The Kumo tool runs a small loopback adapter in its own process and makes sure
+  loopback bypasses the sandbox egress proxy. Without that, the agent's shell,
+  which lacks a loopback `no_proxy` entry, got a policy denial on the client's
+  health check and the agent reported Kumo as blocked.
+- When Kumo is blocked, an agent may still show the `scan` ranking next to a
+  clear "blocked" note. The skill forbids presenting it as a Kumo result, but
+  that is an instruction, not enforcement.
 - The first retrieval builds an embedding cache in the sandbox's temp directory
   (about 12 seconds); later queries take about 2 seconds. One early first run
   failed after two minutes and could not be reproduced.
@@ -264,5 +314,10 @@ only. The Kumo route is not allowed yet and is added with stage 3.
 ## Third-party services and dependencies
 
 Uses the installed NemoClaw and OpenClaw components and NVIDIA Endpoints for
-inference. The bundled tool uses only the Python standard library, so nothing is
-installed in the sandbox. The 42 CFR text under `data/documents/` is public-domain U.S. regulation text.
+inference. The CPU tools and `retrieve.py` use only the Python standard library.
+`kumo_predict.py` needs `kumo-relational-client[relational]==1.0.2` and pandas
+(`skills/provider-billing-integrity/utilities/requirements-kumo.txt`), which
+`install.sh` installs from PyPI into a virtual environment inside the sandbox;
+they are not vendored, and their transitive dependencies are not pinned. Each
+package and the hosted services are subject to their own terms and availability.
+The 42 CFR text under `data/documents/` is public-domain U.S. regulation text.

@@ -1,8 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Egress for policy retrieval: Nemotron embed and rerank on build.nvidia.com.
-# Two POST paths on two hosts, Python only. Applied by scripts/install.sh.
+# Egress for the hosted NVIDIA models: Nemotron embed and rerank (policy retrieval)
+# and Kumo Relational (risk ranking), on build.nvidia.com. Three POST paths on
+# two hosts, Python only. Applied by scripts/install.sh.
+#
+# The Kumo call sends the graph tables (synthetic provider, address, claim and
+# finding rows) to the hosted service.
 #
 # Credentials never enter the sandbox. The embed call uses the sandbox's
 # NVIDIA_INFERENCE_API_KEY placeholder (bound to integrate.api.nvidia.com); the
@@ -10,8 +14,6 @@
 # providers/nvidia-ai-api.yaml (bound to ai.api.nvidia.com). OpenShell replaces
 # each placeholder at egress and only on its bound host.
 #
-# The Kumo route (/v1/structured-data/nvidia/kumo-relational/**) is deliberately
-# not allowed yet; it arrives with the Kumo stage.
 
 version: 1
 preset:
@@ -36,6 +38,9 @@ network_policies:
       - allow:
           method: POST
           path: /v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking
+      - allow:
+          method: POST
+          path: /v1/structured-data/nvidia/kumo-relational/predictions
     binaries:
     - path: /usr/bin/python3*
     - path: /usr/local/bin/python3*

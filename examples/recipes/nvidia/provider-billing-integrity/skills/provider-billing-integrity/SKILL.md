@@ -7,7 +7,8 @@ description: >-
   questions about upcoding, related-entity clusters, cluster exposure, and whether a similar-looking
   pair of providers deserves escalation. Any statement about what 42 CFR 455.23, 424.535, 411.353 or
   1001.951 requires must come from this skill's retrieval tool (utilities/retrieve.py), quoted with its
-  document and chunk. Produces referral recommendations for human review, never fraud determinations
+  document and chunk, and any statement about which providers are likely to be audited must come from
+  Kumo (utilities/kumo_predict.py). Produces referral recommendations for human review, never fraud determinations
   or payment suspensions.
 ---
 
@@ -17,9 +18,9 @@ description: >-
 
 A reviewer must decide which of 80 synthetic providers to refer for investigation, which other
 providers are tied to them, and how much was paid to each group. Everything here is computed from
-the CSV files in `data/` with the tools in `utilities/`. The only network use is policy retrieval
-(below), which calls hosted Nemotron models. Every provider, address, bank account and amount is
-synthetic.
+the CSV files in `data/` with the tools in `utilities/`. The only network use is policy retrieval and
+Kumo (below), which call hosted NVIDIA models; Kumo receives the provider, address, claim and finding
+tables. Every provider, address, bank account and amount is synthetic.
 
 ## Before you write any answer
 
@@ -31,7 +32,12 @@ Run these in order and use their output. If a step does not apply to the questio
    regulation question, for example `--query "when must a State suspend payments and when may it decline"`
    and `--query "revocation for a pattern of claims that fail Medicare requirements"`. Write the policy
    section only from the passages it returns.
-3. Every policy statement in the answer ends with the passage's `cite` value, copied exactly from the tool
+3. **If the answer says which providers are likely to be audited in the next 90 days, you must run**
+   `python3 utilities/kumo_predict.py --top 10` **and use its ranking.** Then run `integrity_tool.py scan`
+   and compare the two lists in the answer: say where they agree, where they differ, and what each
+   method uses (Kumo learns from the relational graph of providers, addresses, claims and prior
+   findings; `scan` is a fixed billing-rule score).
+4. Every policy statement in the answer ends with the passage's `cite` value, copied exactly from the tool
    output, for example `[42-cfr-455-23-payment-suspension.md, chunk 0]`. Do not write section or
    paragraph numbers from memory, and do not cite a passage you did not retrieve. A policy statement
    without a `cite` tag is not allowed; delete it, or report the policy part as blocked.
@@ -56,8 +62,16 @@ Run these in order and use their output. If a step does not apply to the questio
    `data/documents/` to answer instead: an answer without a retrieval receipt is not a retrieved
    answer. `--method bm25` is a labeled
    offline comparison, not a fallback: use it only when asked, and say it is BM25.
-8. **Out of scope in this version:** Kumo risk ranking, GPU acceleration, and Auto Ontology. Say
-   these are not available if asked.
+8. **Kumo is a ranking, not a verdict.** Report providers by rank and probability from the tool
+   output, state the anchor (2026-06-30), the 90-day horizon and that few prior findings exist in the
+   graph, so the ranking shows the method works and is not a measured accuracy. Treat the
+   probabilities as relative scores: do not quote them as calibrated risk or compare them with scores
+   from other runs. A Kumo ranking is a reason to review, never a determination.
+9. **A blocked Kumo stays blocked.** If `kumo_predict.py` exits with `blocked`, report the Kumo
+   ranking as blocked with that message. Do not present `scan` as a Kumo ranking or as its
+   substitute.
+10. **Out of scope in this version:** GPU acceleration and Auto Ontology. Say these are not available
+   if asked.
 
 ## Tools
 
@@ -73,6 +87,15 @@ python3 utilities/integrity_tool.py cluster-exposure <PROVIDER_ID> --as-of 2026-
 python3 utilities/retrieve.py --query "<policy question>" --top 3
 ```
 
+```bash
+python3 utilities/kumo_predict.py --top 10
+```
+
+- `kumo_predict.py` ranks all 80 providers by the probability of an audit finding in the 90 days after
+  2026-06-30, with NVIDIA Kumo Relational (hosted). It builds a graph of providers, addresses, claims
+  and findings as of the anchor (nothing later enters it), sends those tables to the hosted service, and
+  prints the top providers with the PQL, the package version and graph sizes. It takes a few seconds.
+  It uses a separate Python environment that it switches to by itself.
 - `retrieve.py` finds citation-ready passages in the four public 42 CFR sections in
   `data/documents/` (455.23 payment suspension, 424.535 revocation, 411.353 referral prohibition,
   1001.951 fraud and kickbacks). It embeds the chunks and the query with Nemotron embed, then
@@ -100,9 +123,10 @@ Work in this order unless the question dictates otherwise:
 3. **How much is at stake?** Run `cluster-exposure`.
 4. **Is each link meaningful?** Compare the billing behaviour of cluster members and of any
    look-alike groups. Say why each group is or is not worth escalating.
-5. **Find the policy basis.** Run `retrieve.py` for what the regulations say about suspending
+5. **Rank risk with Kumo** when the question asks who is likely to be audited, and compare with `scan`.
+6. **Find the policy basis.** Run `retrieve.py` for what the regulations say about suspending
    payments, revocation or referral, and quote the passage you rely on with its document and chunk.
-6. **Write the recommendation.** Combine payment evidence, related entities, the retrieved policy
+7. **Write the recommendation.** Combine payment evidence, related entities, the retrieved policy
    basis and what remains uncertain, ending with a recommended next step for a human reviewer.
 
 Cite the command or file behind every number. Keep observed facts, associations and judgments

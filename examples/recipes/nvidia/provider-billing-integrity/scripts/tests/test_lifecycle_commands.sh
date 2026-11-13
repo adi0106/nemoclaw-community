@@ -97,6 +97,14 @@ assert_contains "$log" \
 assert_contains "$log" \
   "args=billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
   "install did not deploy the skill"
+assert_contains "$log" "args=billing-integrity policy-add pypi --yes" \
+  "install did not add the temporary pypi preset for the Kumo environment"
+assert_contains "$log" "args=billing-integrity exec --timeout 900 -- bash -c" \
+  "install did not build the Kumo environment inside the sandbox"
+assert_contains "$log" "requirements-kumo.txt" \
+  "the Kumo environment build did not use the pinned requirements"
+assert_contains "$log" "args=billing-integrity policy-remove pypi --yes" \
+  "install did not remove the temporary pypi preset"
 assert_contains "$log" "args=billing-integrity stop" \
   "install did not stop the sandbox after attaching a new provider"
 assert_contains "$log" "args=billing-integrity start" \
@@ -113,7 +121,7 @@ log="$(cat "$COMMAND_LOG")"
 assert_contains "$log" \
   "args=billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
   "install without a key did not deploy the skill"
-if grep -qE 'policy-add|provider create|args=billing-integrity (stop|start)' "$COMMAND_LOG"; then
+if grep -qE 'policy-add|policy-remove|provider create|exec --timeout 900|args=billing-integrity (stop|start)' "$COMMAND_LOG"; then
   fail "install without a key opened egress or created a provider"
 fi
 

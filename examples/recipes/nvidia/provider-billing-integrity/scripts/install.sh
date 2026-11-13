@@ -9,7 +9,9 @@
 #   2. create or update a provider from the key in .env and attach it, and
 #   3. apply the egress policy in policies/, and
 #   4. restart the sandbox when a provider was newly attached: the running agent only
-#      sees a new credential after its container restarts (the workspace is kept).
+#      sees a new credential after its container restarts (the workspace is kept), and
+#   5. build the Kumo virtual environment (about 370 MB) from PyPI, using a temporary
+#      pypi egress preset that is removed again unless it was already applied.
 # The raw key stays in the OpenShell gateway; the sandbox holds placeholders.
 # Without that provider the skill still works and reports retrieval as blocked.
 # Re-run after changing the skill, policies, or key.
@@ -33,12 +35,22 @@ PROFILE_FILE="$EXAMPLE_DIR/providers/nvidia-ai-api.yaml"
 PROFILE_ID="billing-integrity-nvidia-ai-api"
 AI_PROVIDER="${NEMOCLAW_SANDBOX_NAME}-ai-api"
 RESTART_NEEDED=0
+HOSTED_ENABLED=0
 
 enable_hosted_retrieval() {
-  # Import the profile once. An existing profile is kept: changing it means
-  # detaching and deleting the provider, then deleting the profile.
+  # Import the profile once. A profile cannot be edited in place, so an older one
+  # without the Kumo route is replaced: detach and delete its provider, delete the
+  # profile, and import the current file (the provider is created again below).
   if openshell provider profile export "$PROFILE_ID" >/dev/null 2>&1; then
-    echo "Provider profile '$PROFILE_ID' already exists — keeping it."
+    if openshell provider profile export "$PROFILE_ID" 2>/dev/null | grep -Fq 'kumo-relational/predictions'; then
+      echo "Provider profile '$PROFILE_ID' already exists — keeping it."
+    else
+      echo "Provider profile '$PROFILE_ID' predates the Kumo route — recreating it."
+      openshell sandbox provider detach "$NEMOCLAW_SANDBOX_NAME" "$AI_PROVIDER" >/dev/null 2>&1 || true
+      openshell provider delete "$AI_PROVIDER" >/dev/null 2>&1 || true
+      run openshell provider profile delete "$PROFILE_ID"
+      run openshell provider profile import --file "$PROFILE_FILE"
+    fi
   else
     run openshell provider profile import --file "$PROFILE_FILE"
   fi
@@ -63,21 +75,54 @@ enable_hosted_retrieval() {
     --yes
 }
 
+SKILL_DIR_IN_SANDBOX="/sandbox/.openclaw/workspace/skills/provider-billing-integrity"
+
+setup_kumo_environment() {
+  local added_pypi=0
+  if nemoclaw "$NEMOCLAW_SANDBOX_NAME" policy list 2>/dev/null | grep -Eq '● +pypi'; then
+    echo "pypi egress preset already applied — leaving it in place."
+  else
+    run nemoclaw "$NEMOCLAW_SANDBOX_NAME" policy-add pypi --yes
+    added_pypi=1
+  fi
+  local status=0
+  run nemoclaw "$NEMOCLAW_SANDBOX_NAME" exec --timeout 900 -- bash -c '
+    set -e
+    V=/sandbox/kumo-venv
+    if "$V/bin/python" -c "import kumo_relational_client, pandas" 2>/dev/null; then
+      echo "Kumo environment already present"; exit 0
+    fi
+    python3 -m venv "$V"
+    "$V/bin/python" -m pip install --disable-pip-version-check --only-binary=:all: -r "'"$SKILL_DIR_IN_SANDBOX"'/utilities/requirements-kumo.txt"
+  ' || status=$?
+  if [[ "$added_pypi" == "1" ]]; then
+    run nemoclaw "$NEMOCLAW_SANDBOX_NAME" policy-remove pypi --yes
+  fi
+  if [[ "$status" != "0" ]]; then
+    echo "warning: the Kumo environment could not be built; kumo_predict.py will report blocked." >&2
+  fi
+}
+
 echo "Installing provider-billing-integrity into sandbox '$NEMOCLAW_SANDBOX_NAME'"
 if [[ "${NEMOCLAW_PROVIDER:-build}" == "build" && -n "${NVIDIA_INFERENCE_API_KEY:-}" ]]; then
   command -v openshell >/dev/null || {
     echo "openshell not in PATH" >&2
     exit 1
   }
-  echo "Enabling hosted policy retrieval (Nemotron embed and rerank)"
+  echo "Enabling hosted models (Nemotron embed and rerank, Kumo)"
   enable_hosted_retrieval
+  HOSTED_ENABLED=1
 else
-  echo "note: hosted policy retrieval not enabled (needs NEMOCLAW_PROVIDER=build and" >&2
-  echo "      NVIDIA_INFERENCE_API_KEY in .env). The skill will report it as blocked." >&2
+  echo "note: hosted models not enabled (needs NEMOCLAW_PROVIDER=build and" >&2
+  echo "      NVIDIA_INFERENCE_API_KEY in .env). The skill will report retrieval and Kumo as blocked." >&2
 fi
 
 run nemoclaw "$NEMOCLAW_SANDBOX_NAME" skill install \
   "$EXAMPLE_DIR/skills/provider-billing-integrity"
+
+if [[ "$HOSTED_ENABLED" == "1" ]]; then
+  setup_kumo_environment
+fi
 
 if [[ "$RESTART_NEEDED" == "1" ]]; then
   echo "Restarting the sandbox so the agent picks up the new credential (workspace is kept)"

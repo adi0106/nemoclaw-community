@@ -15,11 +15,44 @@ transparent billing-rule baseline, follows shared-entity links to build related
 groups, and reports paid exposure. It recommends review and never determines
 fraud or suspends payment.
 
+The scenario is built around the **NVIDIA Agent Knowledge Foundation**: the
+components that ground an agent's analysis in governed definitions, relational
+predictions, retrieved evidence and GPU-accelerated analytics instead of model
+memory. See [Agent Knowledge Foundation](#agent-knowledge-foundation) for what
+each component does here and which ones this version includes.
+
 > **Status: skeleton under development.** Only the offline CPU workflow is
-> included. Kumo risk ranking, Nemotron policy retrieval, GPU acceleration and
-> Auto Ontology are planned and are not in the skill yet (see
+> included. None of the Agent Knowledge Foundation components below is wired
+> into the skill yet; the CPU tool stands in for them (see
 > [Roadmap](#roadmap)). The offline workflow has been run once end to end; see
 > [Verification](#verification).
+
+## Agent Knowledge Foundation
+
+Each question a reviewer asks here has a component of the NVIDIA Agent
+Knowledge Foundation that answers it best. The table shows the intended design
+and what this version actually ships.
+
+| Reviewer question | Foundation component | In this version |
+| --- | --- | --- |
+| What do the tables mean, and what is the right denominator? | **Auto Ontology**: a semantic layer over the provider-billing database with terms, relationships and measures that carry explicit as-of dates, queried through grounded text-to-SQL | Not included. The skill reads the CSV files directly. |
+| Who is likely to be audited in the next 90 days? | **Kumo** (`nvidia/kumo-relational`, hosted on build.nvidia.com): relational prediction over providers, addresses, claims and audit findings | Not included. `scan` is a transparent rule baseline, which is also the comparison point for a Kumo ranking. |
+| What does policy say? | **Nemotron embed and rerank**: retrieval over four public 42 CFR sections with citable passages | Not included. The text ships in `data/documents/` but the skill does not search it yet. |
+| Who is connected, and does it scale? | **RAPIDS** (cuDF, cuGraph through nx-cugraph): the same baseline and related-entity expansion on GPU | Not included. `related` and `cluster-exposure` run on CPU in the standard library. |
+
+What the foundation adds is grounding. An answer that names a provider, a
+dollar figure or a regulation can be traced to a query, a model run with its
+inputs, or a retrieved passage, and a step that cannot run is reported as
+blocked rather than filled in from memory. The skill's rules already enforce
+the last part: every number comes from a command that was run, and an
+unavailable step is reported as blocked.
+
+The same scenario ran with these components outside NemoClaw in the source
+experiments, where the CPU and GPU tools produced matching answers, hosted
+Kumo ranked the planted ring highest, and Auto Ontology answered three of four
+grounded questions correctly. Those results are not reproduced by this recipe.
+This recipe's job is to place them inside a NemoClaw sandbox with reviewed
+network policy, one component at a time.
 
 ## Screenshot
 
@@ -151,13 +184,20 @@ the bundled tool.
 
 ## Roadmap
 
-| Stage | Needs |
-| --- | --- |
-| Kumo risk ranking | Egress policy for `ai.api.nvidia.com`, a pinned Python 3.12 environment with `kumo-relational-client`, and a decision on how the API key reaches the call. |
-| Policy retrieval | Embed and rerank egress policy and the same key decision, or an offline BM25 option. |
-| GPU path | A host-side service, not the sandbox. |
-| Auto Ontology | A host-side deployment reached through an authenticated, reviewed path. |
-| Evidence | A real sandbox run, a screenshot, and an upgraded evidence level. |
+Each stage adds one Agent Knowledge Foundation component and keeps the CPU tool
+as the baseline to compare against.
+
+| Stage | Component | Needs |
+| --- | --- | --- |
+| 1 (this version) | CPU baseline | Standard-library tool, offline. |
+| 2 | Nemotron embed and rerank for policy evidence | Egress policy for the hosted embedding and reranking endpoints, and a decision on how the API key reaches the call from inside the sandbox; or an offline BM25 option. |
+| 3 | Kumo risk ranking | Egress policy for the hosted Kumo endpoint and a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
+| 4 | Auto Ontology | A host-side deployment reached through an authenticated, reviewed path, with its own API token. |
+| 5 | RAPIDS on GPU | A host-side service, not the sandbox. |
+| Evidence | Screenshot and a higher evidence level per stage | A real sandbox run of each stage. |
+
+`policies-optional/nvidia-hosted-models.yaml` is a draft egress policy for
+stages 2 and 3 and is never applied by the scripts.
 
 ## Known limitations
 

@@ -24,7 +24,8 @@ export COMMAND_LOG
 
 # Exercise an isolated copy so a developer's ignored .env cannot affect the
 # command contract test or expose real credentials to the test process.
-mkdir -p "$EXAMPLE_DIR/scripts" "$EXAMPLE_DIR/skills/provider-billing-integrity"
+mkdir -p "$EXAMPLE_DIR/scripts" "$EXAMPLE_DIR/skills/provider-billing-integrity" \
+  "$EXAMPLE_DIR/providers" "$EXAMPLE_DIR/policies"
 cp "$SOURCE_EXAMPLE_DIR/scripts/_lib.sh" \
   "$SOURCE_EXAMPLE_DIR/scripts/onboard.sh" \
   "$SOURCE_EXAMPLE_DIR/scripts/install.sh" \
@@ -42,9 +43,17 @@ nemoclaw() {
 export -f nemoclaw
 
 openshell() {
+  {
+    printf 'openshell args='
+    printf '%q ' "$@"
+    printf 'key_in_env=%s\n' "${NVIDIA_AI_API_KEY:+yes}"
+  } >>"$COMMAND_LOG"
   if [[ "$*" == "sandbox list --names" && "${FAKE_SANDBOX_EXISTS:-0}" == "1" ]]; then
     printf '%s\n' "${NEMOCLAW_SANDBOX_NAME:-billing-integrity}"
   fi
+  # A fresh gateway: no provider exists yet, and the profile import succeeds.
+  [[ "$1 $2" != "provider get" && "$1 $2 $3" != "provider profile export" ]] || return 1
+  return 0
 }
 export -f openshell
 
@@ -68,13 +77,44 @@ FAKE_SANDBOX_EXISTS=1 bash "$EXAMPLE_DIR/scripts/stop.sh" >/dev/null
 assert_contains "$(cat "$COMMAND_LOG")" "args=tunnel stop" \
   "stop did not stop the gateway through tunnel stop"
 
+# install with a build.nvidia.com key: hosted retrieval is enabled, then the skill is installed
 : >"$COMMAND_LOG"
-FAKE_SANDBOX_EXISTS=1 bash "$EXAMPLE_DIR/scripts/install.sh" >/dev/null
-assert_contains "$(cat "$COMMAND_LOG")" \
+FAKE_SANDBOX_EXISTS=1 NEMOCLAW_PROVIDER=build NVIDIA_INFERENCE_API_KEY=test-key \
+  bash "$EXAMPLE_DIR/scripts/install.sh" >/dev/null
+log="$(cat "$COMMAND_LOG")"
+assert_contains "$log" \
+  "openshell args=provider profile import --file $EXAMPLE_DIR/providers/nvidia-ai-api.yaml" \
+  "install did not import the provider profile"
+assert_contains "$log" \
+  "openshell args=provider create --name billing-integrity-ai-api --type billing-integrity-nvidia-ai-api --credential NVIDIA_AI_API_KEY key_in_env=yes" \
+  "install did not create the second provider from the environment key"
+assert_contains "$log" \
+  "openshell args=sandbox provider attach billing-integrity billing-integrity-ai-api" \
+  "install did not attach the provider to the sandbox"
+assert_contains "$log" \
+  "args=billing-integrity policy-add --from-dir $EXAMPLE_DIR/policies --yes" \
+  "install did not apply the egress policy directory"
+assert_contains "$log" \
   "args=billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
   "install did not deploy the skill"
-if grep -q 'policy-add' "$COMMAND_LOG"; then
-  fail "install applied a network policy; v1 is offline"
+assert_contains "$log" "args=billing-integrity stop" \
+  "install did not stop the sandbox after attaching a new provider"
+assert_contains "$log" "args=billing-integrity start" \
+  "install did not start the sandbox after attaching a new provider"
+if grep -q 'test-key' "$COMMAND_LOG"; then
+  fail "the key value appeared in a command line"
+fi
+
+# install without a key: only the skill is installed and no egress is opened
+: >"$COMMAND_LOG"
+FAKE_SANDBOX_EXISTS=1 NEMOCLAW_PROVIDER=build NVIDIA_INFERENCE_API_KEY= \
+  bash "$EXAMPLE_DIR/scripts/install.sh" >/dev/null 2>&1
+log="$(cat "$COMMAND_LOG")"
+assert_contains "$log" \
+  "args=billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
+  "install without a key did not deploy the skill"
+if grep -qE 'policy-add|provider create|args=billing-integrity (stop|start)' "$COMMAND_LOG"; then
+  fail "install without a key opened egress or created a provider"
 fi
 
 echo "ok"

@@ -21,11 +21,10 @@ predictions, retrieved evidence and GPU-accelerated analytics instead of model
 memory. See [Agent Knowledge Foundation](#agent-knowledge-foundation) for what
 each component does here and which ones this version includes.
 
-> **Status: skeleton under development.** Only the offline CPU workflow is
-> included. None of the Agent Knowledge Foundation components below is wired
-> into the skill yet; the CPU tool stands in for them (see
-> [Roadmap](#roadmap)). The offline workflow has been run once end to end; see
-> [Verification](#verification).
+> **Status: under development.** The CPU baseline and **Nemotron embed and
+> rerank** policy retrieval are included and verified. Kumo, Auto Ontology and
+> RAPIDS are planned (see [Roadmap](#roadmap)). See
+> [Verification](#verification) for exactly what was run.
 
 ## Agent Knowledge Foundation
 
@@ -37,7 +36,7 @@ and what this version actually ships.
 | --- | --- | --- |
 | What do the tables mean, and what is the right denominator? | **Auto Ontology**: a semantic layer over the provider-billing database with terms, relationships and measures that carry explicit as-of dates, queried through grounded text-to-SQL | Not included. The skill reads the CSV files directly. |
 | Who is likely to be audited in the next 90 days? | **Kumo** (`nvidia/kumo-relational`, hosted on build.nvidia.com): relational prediction over providers, addresses, claims and audit findings | Not included. `scan` is a transparent rule baseline, which is also the comparison point for a Kumo ranking. |
-| What does policy say? | **Nemotron embed and rerank**: retrieval over four public 42 CFR sections with citable passages | Not included. The text ships in `data/documents/` but the skill does not search it yet. |
+| What does policy say? | **Nemotron embed and rerank**: retrieval over four public 42 CFR sections with citable passages | **Included.** `retrieve.py` embeds the chunks and query, reranks the closest, and returns each passage with a ready-made `[document, chunk N]` tag the skill requires in every policy statement. If the hosted call fails it reports `blocked` and substitutes nothing. |
 | Who is connected, and does it scale? | **RAPIDS** (cuDF, cuGraph through nx-cugraph): the same baseline and related-entity expansion on GPU | Not included. `related` and `cluster-exposure` run on CPU in the standard library. |
 
 What the foundation adds is grounding. An answer that names a provider, a
@@ -69,10 +68,10 @@ required before submission.
 | You will get | Ranked leads, related-provider groups with the reason for each link, per-group paid totals, and a referral recommendation. |
 | Runs on | A host that runs NemoClaw with Docker. |
 | Requires | NemoClaw, an NVIDIA Endpoints API key for the agent's model. |
-| Verified on | NemoClaw v0.0.142, OpenShell v0.0.116, OpenClaw harness, Ubuntu 22.04, `nvidia/nemotron-3.5-lightning-30b-a3b` on NVIDIA Endpoints, one run. |
+| Verified on | NemoClaw v0.0.142, OpenShell v0.0.116, OpenClaw harness, Ubuntu 22.04, `nvidia/nemotron-3.5-lightning-30b-a3b` on NVIDIA Endpoints, a handful of runs, not repeated at scale. |
 | Evidence level | live end-to-end |
 | Support and maturity | Best-effort community support; see the repository support policy. |
-| External access, data, and actions | Inference calls to the configured provider. No other network access, no write actions. All data is synthetic. |
+| External access, data, and actions | Inference calls to the configured provider, plus two POST paths from sandbox Python to build.nvidia.com for policy retrieval (embeddings and rerank; the 42 CFR text, not provider data, is what is embedded, along with the question). A second OpenShell provider is created from your key. No write actions. All data is synthetic. |
 | Start here | [Quickstart](#quickstart) |
 | Confirm success | [Verification](#verification) |
 
@@ -104,7 +103,7 @@ Or connect and use the TUI: `nemoclaw billing-integrity connect`, then
 | Script | Purpose |
 | --- | --- |
 | `scripts/onboard.sh` | Create the sandbox with the OpenClaw harness. |
-| `scripts/install.sh` | Install the skill. Applies no network policy. |
+| `scripts/install.sh` | Install the skill. With the `build` provider it also imports the provider profile, creates and attaches a second provider from your key, applies the egress policy, and restarts the sandbox (workspace kept) so the agent sees the new credential. |
 | `scripts/start.sh` | Recover the gateway and host forwards. |
 | `scripts/stop.sh` | Stop the gateway while keeping the sandbox and workspace. |
 | `scripts/generate_data.py` | Regenerate the synthetic data (deterministic). |
@@ -126,20 +125,30 @@ lead rather than guilt.
 
 ## Security notes
 
-- The v1 workflow is offline: `install.sh` applies no network policy, so the
-  sandbox keeps NemoClaw's default egress. The only outbound traffic is the
-  agent's inference provider.
+- Egress is limited to two POST paths for Python only: `integrate.api.nvidia.com`
+  `/v1/embeddings` and `ai.api.nvidia.com` `/v1/retrieval/.../reranking`
+  (`policies/nvidia-hosted-models.yaml`), plus the agent's inference provider.
+  What is sent is the policy text chunks and the reviewer's question; the
+  provider and claims data is not sent to these services.
+- The raw API key stays in the OpenShell gateway. The sandbox holds
+  `openshell:resolve:env:` placeholders, and OpenShell substitutes the key at
+  egress, only on the host each credential is bound to. The embed credential is
+  bound to `integrate.api.nvidia.com`; a second provider created by
+  `install.sh` (`providers/nvidia-ai-api.yaml`) binds the same key to
+  `ai.api.nvidia.com`. Without it, rerank fails with `credential_endpoint_mismatch`.
 - The agent works on synthetic data only. Do not load real claims, beneficiary
   or provider data into this example.
 - Outputs are recommendations for human review. The skill instructs the agent
   not to assert fraud or order a payment suspension; that is a prompt-level
   rule, not an enforced control.
-- `policies-optional/nvidia-hosted-models.yaml` is a draft for planned stages
-  and is never applied by the scripts.
+- Remove it with `openshell sandbox provider detach billing-integrity billing-integrity-ai-api`,
+  `openshell provider delete billing-integrity-ai-api`,
+  `nemoclaw billing-integrity policy remove nvidia-hosted-models`, and
+  `openshell provider profile delete billing-integrity-nvidia-ai-api`.
 
 ## Verification
 
-**Evidence level:** live end-to-end (one run; the offline workflow only)
+**Evidence level:** live end-to-end (one run per workflow below; offline CPU workflow and Nemotron retrieval)
 
 Onboard, install, then ask one question:
 
@@ -161,10 +170,32 @@ tools, the tool running inside the sandbox, and an agent answer whose figures
 match the same tool run on the host.
 
 **This does not verify:** other models, other questions, repeat runs, GPU hosts,
-or the planned Kumo, retrieval and Auto Ontology stages.
+or the planned Kumo and Auto Ontology stages.
 
-Offline checks, without a sandbox, check the lifecycle command contracts and shell syntax
-without creating a sandbox or contacting a service:
+**Policy retrieval.** Reset the agent session first (see
+[Known limitations](#known-limitations)), then ask a policy question in a fresh session:
+
+```bash
+nemoclaw billing-integrity sessions reset agent:main:main --agent main
+nemoclaw billing-integrity agent --agent main --session-id demo-1 -m \
+  "Using the provider-billing-integrity skill, answer in this chat: under 42 CFR 455.23, within how many days must a State send notice of a payment suspension, how many days if law enforcement asks in writing to delay it, and what is the longest the delay can run? And what is the normal range of the reenrollment bar after a revocation under 42 CFR 424.535?"
+```
+
+**Expected result:** 5 days, 30 days and a 90-day maximum, and a 1 to 10 year bar,
+each quote ending in a tag such as `[42-cfr-455-23-payment-suspension.md, chunk 0]`
+and `[42-cfr-424-535-revocation.md, chunk 16]`. In the observed run both chunks
+contain the quoted text, and the gateway audit log
+(`openshell logs billing-integrity | grep reranking`) shows two allowed rerank
+calls from `python3`. Chunk numbers depend on the shipped documents.
+
+**This verifies:** the egress policy and second credential binding, that
+`retrieve.py` runs from the agent's own shell with placeholders only, and that
+an answer's policy quotes match the retrieved chunks.
+
+**This does not verify:** that every policy statement an agent writes is
+retrieved. See the limitations.
+
+Offline checks, without a sandbox or any service call:
 
 ```bash
 bash scripts/tests/test_lifecycle_commands.sh
@@ -189,20 +220,37 @@ as the baseline to compare against.
 
 | Stage | Component | Needs |
 | --- | --- | --- |
-| 1 (this version) | CPU baseline | Standard-library tool, offline. |
-| 2 | Nemotron embed and rerank for policy evidence | Spike passed: with the draft egress policy and a second provider bound to `ai.api.nvidia.com` (`providers-optional/`), embed and rerank calls from sandbox Python return HTTP 200 while the sandbox holds only credential placeholders. Remaining work: wire `retrieve.py` into the skill, apply the policy and provider in `install.sh`, and verify an agent answer cites retrieved passages. |
-| 3 | Kumo risk ranking | The same provider covers the Kumo route (reachable in the spike; a real prediction was not run). Needs a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
+| 1 | CPU baseline | Done: standard-library tool, offline. |
+| 2 | Nemotron embed and rerank for policy evidence | Done: `retrieve.py`, egress policy, second provider, restart on install. Remaining: a larger document set, and measuring retrieval against BM25 (`--method bm25` is included for the comparison). |
+| 3 | Kumo risk ranking | Add the Kumo path to the policy and provider profile (the route was reachable in a spike; a real prediction was not run). Needs a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
 | 4 | Auto Ontology | A host-side deployment reached through an authenticated, reviewed path, with its own API token. |
 | 5 | RAPIDS on GPU | A host-side service, not the sandbox. |
 | Evidence | Screenshot and a higher evidence level per stage | A real sandbox run of each stage. |
 
-`policies-optional/nvidia-hosted-models.yaml` and `providers-optional/nvidia-ai-api.yaml`
-are draft egress and credential definitions for stages 2 and 3 and are never
-applied by the scripts.
+`policies/nvidia-hosted-models.yaml` and `providers/nvidia-ai-api.yaml` cover stage 2
+only. The Kumo route is not allowed yet and is added with stage 3.
 
 ## Known limitations
 
-- Verified with one model and one question. The default model for `build` was
+- **Reset the agent session after changing the skill, and between unrelated
+  tests.** OpenClaw keeps one long session (`agent:main:main`). In testing, an
+  agent that had earlier read the regulation files directly kept doing so and
+  skipped retrieval; after `sessions reset` it ran retrieval as the skill
+  instructs. `nemoclaw billing-integrity sessions reset agent:main:main --agent main`.
+- **A new credential reaches the agent only after the sandbox container
+  restarts.** `install.sh` does this when it attaches the provider. Without
+  it, the agent's rerank call fails with HTTP 403.
+- **The skill's rules are instructions, not enforcement.** With the 30B test
+  model, retrieval was skipped in a long-running session even after the
+  instructions were tightened, and ran in a fresh one. Policy quotes were
+  tagged reliably once the tool emitted a ready-made `cite` string to copy. The model's own
+  section and paragraph references (for example "(d)(1)") can still be wrong, so
+  trust the quoted passage and its `cite` tag, not paragraph numbers the agent
+  adds. Check that retrieval ran when it matters.
+- The first retrieval builds an embedding cache in the sandbox's temp directory
+  (about 12 seconds); later queries take about 2 seconds. One early first run
+  failed after two minutes and could not be reproduced.
+- Verified with one model and a few questions. The default model for `build` was
   changed to `nvidia/nemotron-3.5-lightning-30b-a3b` because the previous
   default returned HTTP 404 for the test key; availability depends on your
   NVIDIA Endpoints account. Set `NEMOCLAW_MODEL` in `.env` to any model your

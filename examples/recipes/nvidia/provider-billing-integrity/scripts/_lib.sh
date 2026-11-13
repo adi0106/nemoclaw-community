@@ -36,4 +36,4 @@ sandbox_exists() {
 
 load_env
 
-NEMOCLAW_SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-provider-billing-integrity}"
+NEMOCLAW_SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-billing-integrity}"

@@ -43,24 +43,24 @@ export -f nemoclaw
 
 openshell() {
   if [[ "$*" == "sandbox list --names" && "${FAKE_SANDBOX_EXISTS:-0}" == "1" ]]; then
-    printf '%s\n' "${NEMOCLAW_SANDBOX_NAME:-provider-billing-integrity}"
+    printf '%s\n' "${NEMOCLAW_SANDBOX_NAME:-billing-integrity}"
   fi
 }
 export -f openshell
 
-export NEMOCLAW_SANDBOX_NAME=provider-billing-integrity
+export NEMOCLAW_SANDBOX_NAME=billing-integrity
 
 : >"$COMMAND_LOG"
 NVIDIA_INFERENCE_API_KEY=test-key bash "$EXAMPLE_DIR/scripts/onboard.sh" >/dev/null
 assert_contains "$(cat "$COMMAND_LOG")" "agent=openclaw" \
   "onboard did not select the OpenClaw harness"
-assert_contains "$(cat "$COMMAND_LOG")" "args=onboard --non-interactive --yes --name provider-billing-integrity" \
+assert_contains "$(cat "$COMMAND_LOG")" "args=onboard --non-interactive --yes --name billing-integrity" \
   "onboard did not create the named sandbox non-interactively"
 
 : >"$COMMAND_LOG"
 FAKE_SANDBOX_EXISTS=1 bash "$EXAMPLE_DIR/scripts/start.sh" >/dev/null
 assert_contains "$(cat "$COMMAND_LOG")" \
-  "args=provider-billing-integrity recover" \
+  "args=billing-integrity recover" \
   "start did not use the sandbox-scoped recover command"
 
 : >"$COMMAND_LOG"
@@ -71,7 +71,7 @@ assert_contains "$(cat "$COMMAND_LOG")" "args=tunnel stop" \
 : >"$COMMAND_LOG"
 FAKE_SANDBOX_EXISTS=1 bash "$EXAMPLE_DIR/scripts/install.sh" >/dev/null
 assert_contains "$(cat "$COMMAND_LOG")" \
-  "args=provider-billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
+  "args=billing-integrity skill install $EXAMPLE_DIR/skills/provider-billing-integrity" \
   "install did not deploy the skill"
 if grep -q 'policy-add' "$COMMAND_LOG"; then
   fail "install applied a network policy; v1 is offline"

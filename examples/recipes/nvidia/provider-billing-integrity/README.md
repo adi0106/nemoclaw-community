@@ -58,11 +58,11 @@ bash scripts/start.sh     # ensure the sandbox is running
 Ask a question:
 
 ```bash
-nemoclaw provider-billing-integrity agent --agent main -m \
+nemoclaw billing-integrity agent --agent main -m \
   "Which providers are connected to P001 through shared entities as of 2026-06-30, and what was paid to that group?"
 ```
 
-Or connect and use the TUI: `nemoclaw provider-billing-integrity connect`, then
+Or connect and use the TUI: `nemoclaw billing-integrity connect`, then
 `openclaw tui`.
 
 ## Commands
@@ -75,7 +75,7 @@ Or connect and use the TUI: `nemoclaw provider-billing-integrity connect`, then
 | `scripts/stop.sh` | Stop the gateway while keeping the sandbox and workspace. |
 | `scripts/generate_data.py` | Regenerate the synthetic data (deterministic). |
 
-To delete the sandbox permanently, run `nemoclaw provider-billing-integrity destroy`
+To delete the sandbox permanently, run `nemoclaw billing-integrity destroy`
 and confirm.
 
 ## What the skill ships

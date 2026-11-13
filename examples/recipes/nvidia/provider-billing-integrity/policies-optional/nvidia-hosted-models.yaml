@@ -4,8 +4,11 @@
 # NOT APPLIED BY scripts/install.sh. Draft for the planned Kumo ranking and
 # Nemotron embed/rerank policy retrieval stages (not yet in the skill).
 # Review the hosts, methods, and paths against live traffic before use.
-# How the NVIDIA API key reaches these calls from inside the sandbox through
-# OpenShell provider plumbing is an open question for those stages.
+# Spike result (OpenShell 0.0.116): with this policy applied, a Python call to
+# integrate.api.nvidia.com/v1/embeddings succeeds using the sandbox's
+# NVIDIA_INFERENCE_API_KEY placeholder; the raw key is never in the sandbox.
+# Calls to ai.api.nvidia.com additionally need a credential bound to that host:
+# see providers-optional/nvidia-ai-api.yaml.
 
 version: 1
 preset:

@@ -190,14 +190,15 @@ as the baseline to compare against.
 | Stage | Component | Needs |
 | --- | --- | --- |
 | 1 (this version) | CPU baseline | Standard-library tool, offline. |
-| 2 | Nemotron embed and rerank for policy evidence | Egress policy for the hosted embedding and reranking endpoints, and a decision on how the API key reaches the call from inside the sandbox; or an offline BM25 option. |
-| 3 | Kumo risk ranking | Egress policy for the hosted Kumo endpoint and a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
+| 2 | Nemotron embed and rerank for policy evidence | Spike passed: with the draft egress policy and a second provider bound to `ai.api.nvidia.com` (`providers-optional/`), embed and rerank calls from sandbox Python return HTTP 200 while the sandbox holds only credential placeholders. Remaining work: wire `retrieve.py` into the skill, apply the policy and provider in `install.sh`, and verify an agent answer cites retrieved passages. |
+| 3 | Kumo risk ranking | The same provider covers the Kumo route (reachable in the spike; a real prediction was not run). Needs a pinned Python 3.12 environment with `kumo-relational-client`, built into the image because package installs inside the sandbox are fragile. |
 | 4 | Auto Ontology | A host-side deployment reached through an authenticated, reviewed path, with its own API token. |
 | 5 | RAPIDS on GPU | A host-side service, not the sandbox. |
 | Evidence | Screenshot and a higher evidence level per stage | A real sandbox run of each stage. |
 
-`policies-optional/nvidia-hosted-models.yaml` is a draft egress policy for
-stages 2 and 3 and is never applied by the scripts.
+`policies-optional/nvidia-hosted-models.yaml` and `providers-optional/nvidia-ai-api.yaml`
+are draft egress and credential definitions for stages 2 and 3 and are never
+applied by the scripts.
 
 ## Known limitations
 

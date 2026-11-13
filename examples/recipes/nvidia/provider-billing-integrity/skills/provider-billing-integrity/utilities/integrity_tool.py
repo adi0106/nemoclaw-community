@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""CPU tools for provider-billing integrity: a rule baseline and related-entity expansion. pandas only.
+"""CPU tools for provider-billing integrity: a rule baseline and related-entity expansion. standard library only.
 
   python3 utilities/integrity_tool.py scan [--as-of 2026-06-30] [--top 10]
   python3 utilities/integrity_tool.py related P001 [--as-of 2026-06-30]
@@ -17,37 +17,56 @@ Everything is computed from data/*.csv restricted to dates on or before --as-of;
 import argparse
 import json
 import sys
+import csv
+import statistics
+from collections import defaultdict
 from pathlib import Path
-
-import pandas as pd
 
 DATA = Path(__file__).resolve().parent.parent / 'data'
 LINKS = ['address_id', 'bank_account_id', 'owner_id']
 VISITS = ['99213', '99214', '99215']
 
 
+def read(name):
+    with open(DATA / name, newline='') as f:
+        return list(csv.DictReader(f))
+
+
 def load(as_of):
-    providers = pd.read_csv(DATA / 'providers.csv')
-    claims = pd.read_csv(DATA / 'claims.csv', dtype={'procedure_code': str})
-    return providers, claims[claims['claim_date'] <= as_of]
+    providers = read('providers.csv')
+    claims = [c for c in read('claims.csv') if c['claim_date'] <= as_of]
+    return providers, claims
 
 
 def scan(as_of, top):
     providers, claims = load(as_of)
-    visits = claims[claims['procedure_code'].isin(VISITS)]
-    share = (visits.assign(top=visits['procedure_code'] == '99215').groupby('provider_id')['top'].mean().rename('top_level_share'))
-    volume = claims.groupby('provider_id').size().rename('claims')
-    frame = providers.set_index('provider_id')[['specialty']].join(share).join(volume).fillna({'top_level_share': 0, 'claims': 0})
-    frame['peer_volume_ratio'] = frame['claims'] / frame.groupby('specialty')['claims'].transform('median')
-    frame['score'] = (frame['top_level_share'] * 0.7 + (frame['peer_volume_ratio'].clip(upper=5) / 5) * 0.3).round(4)
-    rows = frame.reset_index().sort_values(['score', 'provider_id'], ascending=[False, True]).head(top)
-    return [{'provider_id': r.provider_id, 'specialty': r.specialty, 'claims': int(r.claims),
-             'top_level_share': round(r.top_level_share, 3), 'peer_volume_ratio': round(r.peer_volume_ratio, 2), 'score': r.score}
-            for r in rows.itertuples()]
+    volume = defaultdict(int)
+    visits = defaultdict(list)
+    for c in claims:
+        volume[c['provider_id']] += 1
+        if c['procedure_code'] in VISITS:
+            visits[c['provider_id']].append(c['procedure_code'] == '99215')
+    by_specialty = defaultdict(list)
+    for p in providers:
+        by_specialty[p['specialty']].append(volume[p['provider_id']])
+    median = {s: statistics.median(v) for s, v in by_specialty.items()}
+    rows = []
+    for p in providers:
+        pid = p['provider_id']
+        v = visits[pid]
+        share = sum(v) / len(v) if v else 0.0
+        n = volume[pid]
+        m = median[p['specialty']]
+        ratio = n / m if m else (float('inf') if n else 0.0)
+        score = round(share * 0.7 + (min(ratio, 5) / 5) * 0.3, 4)
+        rows.append({'provider_id': pid, 'specialty': p['specialty'], 'claims': n,
+                     'top_level_share': round(share, 3), 'peer_volume_ratio': round(ratio, 2), 'score': score})
+    rows.sort(key=lambda r: (-r['score'], r['provider_id']))
+    return rows[:top]
 
 
 def components(providers):
-    parent = {p: p for p in providers['provider_id']}
+    parent = {p['provider_id']: p['provider_id'] for p in providers}
 
     def find(x):
         while parent[x] != x:
@@ -57,8 +76,12 @@ def components(providers):
 
     reasons = {}
     for column in LINKS:
-        for value, group in providers.groupby(column):
-            ids = sorted(group['provider_id'])
+        shared = defaultdict(list)
+        for p in providers:
+            if p[column]:
+                shared[p[column]].append(p['provider_id'])
+        for value, group in sorted(shared.items()):
+            ids = sorted(group)
             for other in ids[1:]:
                 parent[find(other)] = find(ids[0])
             if len(ids) > 1:
@@ -71,7 +94,7 @@ def components(providers):
 
 def related(provider, as_of):
     providers, _ = load(as_of)
-    providers = providers[providers['enrolled_date'] <= as_of]
+    providers = [p for p in providers if p['enrolled_date'] <= as_of]
     groups, reasons = components(providers)
     cluster = next((sorted(g) for g in groups.values() if provider in g), None)
     if cluster is None:
@@ -84,10 +107,15 @@ def related(provider, as_of):
 def exposure(provider, as_of):
     cluster = related(provider, as_of)['cluster']
     _, claims = load(as_of)
-    sub = claims[claims['provider_id'].isin(cluster)]
-    per = sub.groupby('provider_id')['paid_usd'].agg(['count', 'sum']).round(2)
-    return {'cluster': cluster, 'total_claims': int(per['count'].sum()), 'total_paid_usd': round(float(per['sum'].sum()), 2),
-            'per_provider': {p: {'claims': int(r['count']), 'paid_usd': float(r['sum'])} for p, r in per.iterrows()}}
+    count = defaultdict(int)
+    paid = defaultdict(float)
+    for c in claims:
+        if c['provider_id'] in cluster:
+            count[c['provider_id']] += 1
+            paid[c['provider_id']] += float(c['paid_usd'])
+    per = {p: {'claims': count[p], 'paid_usd': round(paid[p], 2)} for p in sorted(count)}
+    return {'cluster': cluster, 'total_claims': sum(r['claims'] for r in per.values()),
+            'total_paid_usd': round(sum(r['paid_usd'] for r in per.values()), 2), 'per_provider': per}
 
 
 def main():

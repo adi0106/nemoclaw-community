@@ -4,7 +4,7 @@
 | --- | --- |
 | Description | Helps program-integrity reviewers find anomalous provider billing, expand each lead to providers linked by shared addresses, bank accounts or owners, and total the paid exposure of each group, ending in a referral recommendation for a human. |
 | Industry | 🏛️ Public Sector |
-| Requirements | Docker · NemoClaw · NVIDIA Endpoints API key · Python 3 with pandas inside the sandbox (unverified) |
+| Requirements | Docker · NemoClaw · NVIDIA Endpoints API key |
 | NemoClaw | Unpinned |
 | Harness | OpenClaw Unpinned |
 | OpenShell | Unpinned |
@@ -18,7 +18,8 @@ fraud or suspends payment.
 > **Status: skeleton under development.** Only the offline CPU workflow is
 > included. Kumo risk ranking, Nemotron policy retrieval, GPU acceleration and
 > Auto Ontology are planned and are not in the skill yet (see
-> [Roadmap](#roadmap)). The sandbox flow has not been run end to end.
+> [Roadmap](#roadmap)). The offline workflow has been run once end to end; see
+> [Verification](#verification).
 
 ## Screenshot
 
@@ -35,8 +36,8 @@ required before submission.
 | You will get | Ranked leads, related-provider groups with the reason for each link, per-group paid totals, and a referral recommendation. |
 | Runs on | A host that runs NemoClaw with Docker. |
 | Requires | NemoClaw, an NVIDIA Endpoints API key for the agent's model. |
-| Verified on | Not yet verified in a sandbox. |
-| Evidence level | local/static |
+| Verified on | NemoClaw v0.0.142, OpenShell v0.0.116, OpenClaw harness, Ubuntu 22.04, `nvidia/nemotron-3.5-lightning-30b-a3b` on NVIDIA Endpoints, one run. |
+| Evidence level | live end-to-end |
 | Support and maturity | Best-effort community support; see the repository support policy. |
 | External access, data, and actions | Inference calls to the configured provider. No other network access, no write actions. All data is synthetic. |
 | Start here | [Quickstart](#quickstart) |
@@ -105,9 +106,31 @@ lead rather than guilt.
 
 ## Verification
 
-**Evidence level:** local/static
+**Evidence level:** live end-to-end (one run; the offline workflow only)
 
-From this directory, check the lifecycle command contracts and shell syntax
+Onboard, install, then ask one question:
+
+```bash
+bash scripts/onboard.sh && bash scripts/install.sh && bash scripts/start.sh
+nemoclaw billing-integrity agent --agent main -m \
+  "Using the provider-billing-integrity skill: which providers are connected to P001 through shared addresses, bank accounts or owners as of 2026-06-30, what was paid to that group in total, and is P020 part of it? Give a short referral recommendation."
+```
+
+**Expected result:** an answer that runs `integrity_tool.py`, names the six-provider
+cluster P001 to P006 linked by two addresses, one bank account and one owner,
+reports 1,255 claims and a total paid of $211,006.18, states that P020 (206
+claims, $24,418.69) shares no entity with the cluster, and ends with a
+recommendation for human review that does not assert fraud. Wording varies by
+model; the numbers come from the tool and are deterministic.
+
+**This verifies:** sandbox creation, skill installation with its data and
+tools, the tool running inside the sandbox, and an agent answer whose figures
+match the same tool run on the host.
+
+**This does not verify:** other models, other questions, repeat runs, GPU hosts,
+or the planned Kumo, retrieval and Auto Ontology stages.
+
+Offline checks, without a sandbox, check the lifecycle command contracts and shell syntax
 without creating a sandbox or contacting a service:
 
 ```bash
@@ -122,14 +145,9 @@ cd skills/provider-billing-integrity
 python3 utilities/integrity_tool.py scan --as-of 2026-06-30 --top 3
 ```
 
-**Expected result:** the first command prints `ok`; the second prints a JSON
-list of three providers with `score` values.
-
-**This verifies:** the host scripts issue the expected commands and the bundled
-tool runs on the bundled data.
-
-**This does not verify:** sandbox creation, skill installation, whether
-Python and pandas are available in the sandbox, or the agent's answers.
+Expected: the first command prints `ok`; the second prints a JSON list of three
+providers with `score` values. These two checks cover only the host scripts and
+the bundled tool.
 
 ## Roadmap
 
@@ -143,12 +161,19 @@ Python and pandas are available in the sandbox, or the agent's answers.
 
 ## Known limitations
 
-- The sandbox flow, skill installation and pandas availability are untested.
+- Verified with one model and one question. The default model for `build` was
+  changed to `nvidia/nemotron-3.5-lightning-30b-a3b` because the previous
+  default returned HTTP 404 for the test key; availability depends on your
+  NVIDIA Endpoints account. Set `NEMOCLAW_MODEL` in `.env` to any model your
+  key can call.
+- The sandbox is created with `--no-sandbox-gpu` because this recipe is
+  CPU-only. On the test host GPU passthrough failed on a stale CDI file.
+- NemoClaw limits sandbox names to 19 characters.
 - The data is synthetic and small; results show the method works, not that it
   would perform on real programs.
 
 ## Third-party services and dependencies
 
 Uses the installed NemoClaw and OpenClaw components and NVIDIA Endpoints for
-inference. The bundled tool needs pandas (`utilities/requirements.txt`). The
-42 CFR text under `data/documents/` is public-domain U.S. regulation text.
+inference. The bundled tool uses only the Python standard library, so nothing is
+installed in the sandbox. The 42 CFR text under `data/documents/` is public-domain U.S. regulation text.

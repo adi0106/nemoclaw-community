@@ -51,8 +51,8 @@ python3 utilities/integrity_tool.py cluster-exposure <PROVIDER_ID> --as-of 2026-
   and in total.
 
 Data files are in `data/`: `providers.csv`, `claims.csv`, `addresses.csv`, `bank_accounts.csv`,
-`beneficiaries.csv`, `audit_findings.csv`. Use pandas for any question the three commands do not
-cover, and show the code you ran.
+`beneficiaries.csv`, `audit_findings.csv`. For any question the three commands do not cover, write a short
+Python script with the standard library (`csv`, `statistics`, `collections`; pandas is not installed) and show the code you ran.
 
 ## How to answer
 

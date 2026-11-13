@@ -54,7 +54,7 @@ export NEMOCLAW_SANDBOX_NAME=billing-integrity
 NVIDIA_INFERENCE_API_KEY=test-key bash "$EXAMPLE_DIR/scripts/onboard.sh" >/dev/null
 assert_contains "$(cat "$COMMAND_LOG")" "agent=openclaw" \
   "onboard did not select the OpenClaw harness"
-assert_contains "$(cat "$COMMAND_LOG")" "args=onboard --non-interactive --yes --name billing-integrity" \
+assert_contains "$(cat "$COMMAND_LOG")" "args=onboard --non-interactive --yes --name billing-integrity --no-sandbox-gpu" \
   "onboard did not create the named sandbox non-interactively"
 
 : >"$COMMAND_LOG"

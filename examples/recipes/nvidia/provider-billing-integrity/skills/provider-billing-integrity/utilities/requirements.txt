@@ -1,5 +1,0 @@
-# CPU path (integrity_tool.py, generate_data.py, build_database.py, check_ontology.py): any Python 3 with pandas.
-pandas>=2.3,<2.4
-# Kumo (kumo_predict.py) needs Python 3.12 in its own environment. Never add the [explain] extra: it sends raw cell values to a third-party LLM.
-# kumo-relational-client[relational]==1.0.2
-# The optional GPU path has its own file: requirements-gpu.txt (do not install both in one environment).

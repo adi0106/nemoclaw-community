@@ -4,7 +4,8 @@
 #
 # Create the provider-billing-integrity sandbox non-interactively with the
 # OpenClaw harness. NVIDIA Endpoints is the default inference provider. Web
-# search is disabled: the skill works only from the data it ships.
+# search is disabled: the skill works only from the data it ships. The sandbox
+# is CPU-only, so GPU passthrough is turned off.
 
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +20,7 @@ if ! command -v nemoclaw >/dev/null; then
 fi
 
 NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-build}"
-NEMOCLAW_MODEL="${NEMOCLAW_MODEL:-nvidia/nemotron-3-super-120b-a12b}"
+NEMOCLAW_MODEL="${NEMOCLAW_MODEL:-nvidia/nemotron-3.5-lightning-30b-a3b}"
 
 case "$NEMOCLAW_PROVIDER" in
   build)
@@ -55,6 +56,7 @@ run nemoclaw onboard \
   --non-interactive \
   --yes \
   --name "$NEMOCLAW_SANDBOX_NAME" \
+  --no-sandbox-gpu \
   --yes-i-accept-third-party-software
 
 echo

@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# NOT APPLIED BY scripts/install.sh. Draft for the planned Kumo ranking and
+# Nemotron embed/rerank policy retrieval stages (not yet in the skill).
+# Review the hosts, methods, and paths against live traffic before use.
+# How the NVIDIA API key reaches these calls from inside the sandbox through
+# OpenShell provider plumbing is an open question for those stages.
+
+version: 1
+preset:
+  name: nvidia-hosted-models
+network_policies:
+  nvidia-hosted-models:
+    name: nvidia-hosted-models
+    endpoints:
+    - host: integrate.api.nvidia.com
+      port: 443
+      protocol: rest
+      enforcement: enforce
+      rules:
+      - allow:
+          method: POST
+          path: /v1/embeddings
+    - host: ai.api.nvidia.com
+      port: 443
+      protocol: rest
+      enforcement: enforce
+      rules:
+      - allow:
+          method: POST
+          path: /v1/structured-data/nvidia/kumo-relational/**
+      - allow:
+          method: POST
+          path: /v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking
+    binaries:
+    - path: /usr/bin/python3*
+    - path: /usr/local/bin/python3*

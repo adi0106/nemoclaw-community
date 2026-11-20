@@ -59,7 +59,11 @@ and your question to its own hosted models. Every issuer, price and headline is 
     check it answers the question as asked (tables, filters, the as-of date, the denominator, for example a
     sector median is the median across issuers of each issuer's 20-session return), and cross-check a figure
     that matters with a short script over `data/`. Quote the SQL and call the result an Auto Ontology answer,
-    not a fact. If `ontology_qa.py` exits with `blocked`, or is not installed, say so and compute from the CSVs,
+    not a fact. Pass the whole question as asked, including every part (for example both the issuer counts and the
+    median), and say if a call timed out or was stopped. If `ontology_qa.py` exits with `blocked`, or returns an
+    empty `sql` (`answered_with_sql` false), or is not installed, say so, quote its `blocked:` or `note` line
+    verbatim without guessing a cause from other output (the sandbox prints `cannot create /proc/self/oom_score_adj`
+    on every command, which is harmless), and compute from the CSVs,
     saying which numbers you computed yourself.
 11. **The GPU is the same analysis on faster hardware, not a different one.** Scripts are plain pandas,
     scikit-learn and NetworkX; `accelerate.py` puts cuDF, cuML and nx-cugraph under them on a GPU sandbox. Copy
@@ -103,7 +107,8 @@ python3 utilities/ontology_qa.py --question "<business question, with the as-of 
 - `ontology_qa.py` asks a host-side NVIDIA Auto Ontology deployment, which holds a semantic layer over the market
   database. It checks the layer is compiled, asks how well the layer covers the question (`coverage`), then
   streams a grounded text-to-SQL answer and prints the generated `sql`, the `rows` it returned and a `response`.
-  A call can take minutes. It needs `AUTO_ONTOLOGY_API_TOKEN` at install time; without it the tool exits with
+  A call can take several minutes: run it with a long timeout (at least 600 seconds), keep waiting until it
+  exits, and never stop it early. It needs `AUTO_ONTOLOGY_API_TOKEN` at install time; without it the tool exits with
   `blocked`.
 
 Data files are in `data/`: `assets.csv`, `daily_prices.csv`, `trading_sessions.csv`, `company_news.csv`,

@@ -27,7 +27,8 @@ evaluation kit; this recipe covers the integration only.
 > on Hermes (see [Verification](#verification)). Retrieval was **not** verified: the hosted embedding model returned
 > HTTP 503 and timeouts during testing, so the Nemotron embed and rerank path and the rule citations never succeeded.
 > Neither agent reliably followed every skill rule in those first runs (see [Known limitations](#known-limitations)),
-> and the GPU and Auto Ontology stages were not run. Do not read any statement below as a measured accuracy or
+> the GPU stage was not run, and Auto Ontology answered a count question but not the median question (see
+> [Auto Ontology](#auto-ontology-optional)). Do not read any statement below as a measured accuracy or
 > speed-up.
 
 ## Agent Knowledge Foundation
@@ -145,6 +146,16 @@ and sends it as `x-api-key`, and `ontology_qa.py`. The deployment must ingest th
 paths and nothing else: `GET /api/semantic-compilation/status`, `POST /api/question-entity-coverage` and
 `POST /api/chat/completions`.
 
+Setting up the deployment, as tested with a local build of Auto Ontology (`22e22c89`) and its Docker Compose stack:
+- Name the SQLite file `market.sqlite`: the database name comes from the file stem and must match `TARGET_DB` in
+  `ontology_qa.py` (`market`).
+- Semantic compilation is off by default; turn it on (`PUT /api/configurations/semantic-compilation` with
+  `{"enabled": true}`) and wait for `/api/semantic-compilation/status` to show `calculated: true`.
+- `AUTO_ONTOLOGY_PORT` is the deployment's **web** port (the one that serves `/api/*`), not its backend port.
+- `APP_URL` in the deployment's configuration must equal the origin you sign in from, or sign-in returns HTTP 403.
+- A call can take several minutes. The agent must wait for it rather than stop it.
+- `scripts/install.sh` replaces the installed skill, so edits made inside the sandbox are lost on re-install.
+
 **The deployment sends the database schema and each question to its own hosted model endpoints, using its own
 configuration. That transfer is outside this sandbox's egress policy**, so review it separately.
 
@@ -152,9 +163,15 @@ configuration. That transfer is outside this sandbox's egress policy**, so revie
 the wrong denominator or a missing as-of date. The skill requires the agent to read and quote the SQL and cross-check
 a figure that matters. That is an instruction, not an enforced control.
 
-This recipe did not run Auto Ontology: the client was exercised only against a local fake server. Expect the same
-integration issues the AKF notes describe for a deployment you build yourself, such as slow structured-output calls
-from a reasoning model.
+**What was tested.** The wiring worked against a local deployment: the database ingested, the layer compiled in about
+38 seconds, the provider and egress policy attached, the three allowed paths were reached from the sandbox, and a
+count question ("how many issuers are in each sector as of 2026-08-31") returned correct SQL and rows in about 30
+seconds. The **median-by-sector question was not answered**: the layer returned no SQL after about four minutes, twice.
+The deployment log showed its generated SQL using three-part table names (`market.main.assets`), which SQLite
+rejects, and the build only strips a `PUBLIC.` prefix. So this recipe does not show Auto Ontology answering the
+median question; the agent computes it from the CSVs and says so. That failure is in the deployment build, not in
+this recipe, and another build may behave differently. In one agent turn the agent also stopped the call early and
+named the wrong cause, which is why the skill now tells it to wait and to quote the tool's own message.
 
 ## Security notes
 
@@ -221,6 +238,9 @@ Then the agent was asked questions 1, 2, 4, 5 and 6 in separate turns.
   correlations and PageRank scores matched a host recomputation. `accelerate.py status` reported no usable GPU, as
   expected, and a script run through `accelerate.py run` printed a CPU engine receipt.
 - Question 1 without Auto Ontology: Hermes reported it blocked and computed from the CSVs.
+- Auto Ontology, on OpenClaw with a local deployment (see [Auto Ontology](#auto-ontology-optional)): the provider, the
+  egress policy and the three allowed paths worked from the sandbox, and a sector-count question returned correct SQL
+  and rows. The median-by-sector question returned no SQL, and in one agent turn the agent stopped the call early.
 
 **This verifies:** that the host scripts run against a real gateway on both harnesses, that the Python environments
 build in the sandbox, that the egress policy and credential placeholders let Kumo through, that the agent can load the
@@ -233,7 +253,7 @@ skill and write scripts in `work/`, and the offline checks above.
 - **Agent correctness.** The agents were observed to skip `accelerate.py`, to compute the 20-session return one
   session short, and, on OpenClaw, to write policy text while retrieval was blocked (see the next section). The skill
   was tightened for these afterwards; the tightened skill has not been run again.
-- The GPU stage, Auto Ontology against a real deployment, and more than one run per harness.
+- The GPU stage, Auto Ontology on Hermes or answering the median question, and more than one run per harness.
 
 ## Known limitations
 

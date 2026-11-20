@@ -26,6 +26,8 @@ endpoints:
   port: 4000
   protocol: rest
   enforcement: enforce
+  # The sandbox reaches the host through a container-bridge address; its subnet differs between hosts, so this range
+  # covers the private ranges and the binding to host.openshell.internal narrows it. OpenShell warns that it is broad.
   allowed_ips:
   - 172.16.0.0/12
   rules:

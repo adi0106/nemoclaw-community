@@ -150,7 +150,10 @@ def main():
              'row_count': None if rows is None else len(rows),
              'rows': None if rows is None else rows[:ROW_LIMIT],
              'response': summary['response'], 'events': len(result['events']),
-             'check': 'Read the SQL and verify it against the data (for example with integrity_tool.py) before relying on it.'}
+             'check': 'Read the SQL and verify it against the data (for example with a short script over data/) before relying on it.'}
+    if not summary['answered_with_sql']:
+        shown['note'] = 'Auto Ontology returned no SQL for this question; treat the ontology answer as blocked.'
+        print('note: Auto Ontology returned no SQL; treat the ontology answer as blocked. Nothing was substituted.', file=sys.stderr)
     print(json.dumps(shown, indent=2, default=str))
     return 0
 
